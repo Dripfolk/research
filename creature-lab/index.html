@@ -1,0 +1,1201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dripfolk Creature Lab</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    color: #e0e0e0;
+    font-family: 'Courier New', monospace;
+    overflow-x: hidden;
+  }
+  #header {
+    text-align: center;
+    padding: 20px;
+    font-size: 14px;
+    color: #888;
+    letter-spacing: 2px;
+  }
+  #header h1 { font-size: 24px; color: #ccc; margin-bottom: 4px; }
+  #gallery {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    padding: 0 20px 20px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  .card {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+  }
+  .card canvas {
+    width: 100%;
+    display: block;
+    background: #0a0a1a;
+  }
+  .card-label {
+    position: absolute;
+    top: 8px;
+    left: 10px;
+    font-size: 13px;
+    color: #53a8b6;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .card-sub {
+    position: absolute;
+    top: 24px;
+    left: 10px;
+    font-size: 10px;
+    color: #555;
+  }
+  #controls {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 10px 20px 30px;
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .btn {
+    background: #0f3460;
+    border: 1px solid #53a8b6;
+    color: #e0e0e0;
+    padding: 6px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+  }
+  .btn:hover { background: #1a4a7a; }
+  .btn.active { background: #53a8b6; color: #000; }
+</style>
+</head>
+<body>
+<div id="header">
+  <h1>CREATURE LAB</h1>
+  <span>Parametric Creature Generation &mdash; Dripfolk R&amp;D</span>
+</div>
+<div id="gallery"></div>
+<div id="controls">
+  <button class="btn" onclick="toggleSpeed()">Toggle Speed</button>
+  <button class="btn" onclick="regenerateAll()">Regenerate</button>
+  <span style="color:#555; font-size:11px; align-self:center; margin-left:auto;">
+    bodies are top-down view &middot; black silhouette aesthetic
+  </span>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// SECTION 1 — Math Utilities
+// ═══════════════════════════════════════════════════════════════
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+function smoothstep(t) { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); }
+function ease(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3)/2; }
+
+function mulberry32(seed) {
+  return function() {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION 2 — Body Outline Generation
+// ═══════════════════════════════════════════════════════════════
+
+// Generates a closed polygon from a width-profile function.
+// widthFn(t) returns half-width at position t (0 = head tip, 1 = tail tip).
+// Convention: +x = head, -x = tail, ±y = lateral (top-down view).
+function generateBodyOutline(length, widthFn, resolution = 80) {
+  const halfLen = length / 2;
+  const pts = [];
+
+  // Top edge: head → tail (negative y = "left" side in top-down)
+  for (let i = 0; i <= resolution; i++) {
+    const t = i / resolution;
+    const x = halfLen - t * length;
+    const y = -widthFn(t);
+    pts.push([x, y]);
+  }
+  // Bottom edge: tail → head (positive y = "right" side)
+  for (let i = resolution; i >= 0; i--) {
+    const t = i / resolution;
+    const x = halfLen - t * length;
+    const y = widthFn(t);
+    pts.push([x, y]);
+  }
+  return pts;
+}
+
+// ── Width profile library ──
+
+function blobProfile(t, maxW) {
+  return maxW * Math.sin(Math.PI * t);
+}
+
+function serpentProfile(t, maxW) {
+  // Long and thin — capsule shape
+  return maxW * Math.sin(Math.PI * t);
+}
+
+function fishProfile(t, maxW) {
+  // Fusiform: widest ~30% from head, fast tail taper
+  const warp = Math.pow(t, 0.6);
+  const base = Math.sin(Math.PI * warp);
+  // Pinch the tail peduncle (narrow area before tail fin)
+  const peduncle = t > 0.75 ? 0.3 + 0.7 * Math.pow((1 - t) / 0.25, 0.6) : 1;
+  return maxW * base * peduncle;
+}
+
+function birdProfile(t, maxW) {
+  // Compact, egg-shaped — ensure zero at endpoints
+  const envelope = Math.sin(Math.PI * t); // zero at t=0 and t=1
+  const warp = 0.1 + t * 0.8;
+  const shape = Math.pow(Math.sin(Math.PI * warp), 1.2);
+  return maxW * shape * envelope;
+}
+
+function quadrupedProfile(t, maxW) {
+  // Barrel-shaped, wider chest
+  const base = Math.sin(Math.PI * t);
+  const chest = 1 + 0.15 * Math.exp(-Math.pow((t - 0.3) / 0.15, 2));
+  return maxW * base * chest;
+}
+
+function insectProfile(t) {
+  // Three-segment: head, thorax, abdomen (sum of Gaussians)
+  const head    = 14 * Math.exp(-Math.pow((t - 0.12) / 0.07, 2));
+  const thorax  = 12 * Math.exp(-Math.pow((t - 0.38) / 0.07, 2));
+  const abdomen = 22 * Math.exp(-Math.pow((t - 0.73) / 0.14, 2));
+  return head + thorax + abdomen;
+}
+
+function spiderProfile(t) {
+  // Two-segment: cephalothorax + abdomen
+  const ceph = 18 * Math.exp(-Math.pow((t - 0.25) / 0.12, 2));
+  const abd  = 24 * Math.exp(-Math.pow((t - 0.68) / 0.16, 2));
+  return ceph + abd;
+}
+
+function jellyfishProfile(t, maxW) {
+  // Bell-shaped dome: wide at front, abrupt narrowing at bottom
+  // Ensure zero at t=0 and t=1
+  if (t < 0.05) return maxW * smoothstep(t / 0.05) * Math.sin(Math.PI * 0.05 / 0.65 * 0.5);
+  if (t > 0.65) return maxW * 0.12 * smoothstep((1 - t) / 0.35);
+  return maxW * Math.pow(Math.sin(Math.PI * t / 0.65 * 0.5), 0.7);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION 3 — Appendage Generators
+// ═══════════════════════════════════════════════════════════════
+
+function makeOval(w, h, n = 20) {
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    pts.push([w * Math.cos(a), h * Math.sin(a)]);
+  }
+  return pts;
+}
+
+function makeLeg(len, baseW) {
+  // Tapered shape extending outward (+y)
+  const pts = [];
+  const s = 10;
+  for (let i = 0; i <= s; i++) {
+    const t = i / s;
+    const w = baseW * (1 - t * 0.75);
+    pts.push([w / 2, len * t]);
+  }
+  for (let i = s; i >= 0; i--) {
+    const t = i / s;
+    const w = baseW * (1 - t * 0.75);
+    pts.push([-w / 2, len * t]);
+  }
+  return pts;
+}
+
+function makeWing(len, maxW) {
+  const pts = [];
+  const s = 20;
+  // Leading edge
+  for (let i = 0; i <= s; i++) {
+    const t = i / s;
+    const y = len * t;
+    const x = maxW * 0.3 * Math.sin(Math.PI * t * 0.7);
+    pts.push([x, y]);
+  }
+  // Trailing edge
+  for (let i = s; i >= 0; i--) {
+    const t = i / s;
+    const y = len * t;
+    const x = -maxW * 0.8 * Math.sin(Math.PI * t);
+    pts.push([x, y]);
+  }
+  return pts;
+}
+
+function makeTailFin(len, spread) {
+  // V-shaped forked tail
+  return [
+    [0, 0],
+    [-len * 0.4, -spread],
+    [-len, -spread * 0.7],
+    [-len * 0.6, -spread * 0.1],
+    [-len * 0.45, 0],
+    [-len * 0.6, spread * 0.1],
+    [-len, spread * 0.7],
+    [-len * 0.4, spread],
+  ];
+}
+
+function makePectoralFin(len, w) {
+  // Small paddle fin
+  const pts = [];
+  const s = 10;
+  for (let i = 0; i <= s; i++) {
+    const t = i / s;
+    pts.push([len * t, w * Math.sin(Math.PI * t)]);
+  }
+  for (let i = s; i >= 0; i--) {
+    const t = i / s;
+    pts.push([len * t, -w * 0.3 * Math.sin(Math.PI * t)]);
+  }
+  return pts;
+}
+
+function makeDorsalFin(len, h) {
+  return [
+    [len / 2, 0],
+    [len * 0.3, -h],
+    [0, -h * 0.8],
+    [-len / 2, 0],
+  ];
+}
+
+function makeTail(len, baseW) {
+  const pts = [];
+  const s = 14;
+  for (let i = 0; i <= s; i++) {
+    const t = i / s;
+    const w = baseW * (1 - t * 0.85);
+    pts.push([-len * t, -w / 2]);
+  }
+  for (let i = s; i >= 0; i--) {
+    const t = i / s;
+    const w = baseW * (1 - t * 0.85);
+    pts.push([-len * t, w / 2]);
+  }
+  return pts;
+}
+
+function makeAntenna(len, curve) {
+  const pts = [];
+  const s = 10;
+  const w = 1.5;
+  for (let i = 0; i <= s; i++) {
+    const t = i / s;
+    const x = len * t;
+    const c = curve * Math.sin(Math.PI * t * 0.6);
+    pts.push([x, c + w / 2]);
+  }
+  for (let i = s; i >= 0; i--) {
+    const t = i / s;
+    const x = len * t;
+    const c = curve * Math.sin(Math.PI * t * 0.6);
+    pts.push([x, c - w / 2]);
+  }
+  return pts;
+}
+
+function makeTentacle(len, baseW) {
+  const pts = [];
+  const s = 16;
+  for (let i = 0; i <= s; i++) {
+    const t = i / s;
+    const w = baseW * (1 - t * 0.9);
+    const wave = 3 * Math.sin(t * Math.PI * 3);
+    pts.push([wave + w / 2, len * t]);
+  }
+  for (let i = s; i >= 0; i--) {
+    const t = i / s;
+    const w = baseW * (1 - t * 0.9);
+    const wave = 3 * Math.sin(t * Math.PI * 3);
+    pts.push([wave - w / 2, len * t]);
+  }
+  return pts;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION 4 — Creature Presets
+// ═══════════════════════════════════════════════════════════════
+
+const PRESETS = {
+
+  blob: () => {
+    const L = 150, W = 44;
+    const body = generateBodyOutline(L, t => blobProfile(t, W));
+    const legDefs = [
+      { t: 0.22, phase: 0.6 },
+      { t: 0.38, phase: 0.4 },
+      { t: 0.56, phase: 0.2 },
+      { t: 0.74, phase: 0.0 },
+    ];
+    return {
+      label: 'Blob', sub: 'caterpillar-like',
+      body, bodyLength: L, bodyWidth: W,
+      legs: legDefs.map(ld => ({
+        polygon: makeLeg(14, 7),
+        xPos: 1 - 2 * ld.t,
+        anchorX: L / 2 - ld.t * L,
+        phase: ld.phase,
+      })),
+      eyes: [
+        { pts: makeOval(6, 5), rel: [L * 0.34, -W * 0.55] },
+        { pts: makeOval(6, 5), rel: [L * 0.34,  W * 0.55] },
+      ],
+      appendages: [],
+      locomotion: 'walk',
+      speed: 0.6,
+    };
+  },
+
+  serpent: () => {
+    const L = 280, W = 13;
+    const body = generateBodyOutline(L, t => serpentProfile(t, W), 120);
+    return {
+      label: 'Serpent', sub: 'snake / worm',
+      body, bodyLength: L, bodyWidth: W,
+      legs: [],
+      eyes: [
+        { pts: makeOval(4, 3.5), rel: [L * 0.42, -W * 0.45] },
+        { pts: makeOval(4, 3.5), rel: [L * 0.42,  W * 0.45] },
+      ],
+      appendages: [],
+      locomotion: 'slither',
+      speed: 0.8,
+    };
+  },
+
+  fish: () => {
+    const L = 160, W = 34;
+    const body = generateBodyOutline(L, t => fishProfile(t, W));
+    return {
+      label: 'Fish', sub: 'aquatic',
+      body, bodyLength: L, bodyWidth: W,
+      legs: [],
+      eyes: [
+        { pts: makeOval(5, 4.5), rel: [L * 0.32, -W * 0.5] },
+        { pts: makeOval(5, 4.5), rel: [L * 0.32,  W * 0.5] },
+      ],
+      appendages: [
+        { pts: makeTailFin(22, 20), anchor: [-L * 0.5, 0], angle: 0, z: -1, anim: 'tailOsc' },
+        { pts: makePectoralFin(16, 8), anchor: [L * 0.15, -W * 0.6], angle: -0.5, z: -1, anim: 'finFlutter', side: 'top' },
+        { pts: makePectoralFin(16, 8), anchor: [L * 0.15,  W * 0.6], angle: 0.5, z: -1, anim: 'finFlutter', side: 'bot' },
+        { pts: makeDorsalFin(20, 10), anchor: [L * 0.05, -W * 0.1], angle: 0, z: 1, anim: 'none' },
+      ],
+      locomotion: 'swim',
+      speed: 0.7,
+    };
+  },
+
+  bird: () => {
+    const L = 100, W = 28;
+    const body = generateBodyOutline(L, t => birdProfile(t, W));
+    return {
+      label: 'Bird', sub: 'avian / flying',
+      body, bodyLength: L, bodyWidth: W,
+      legs: [
+        { polygon: makeLeg(10, 4), xPos: -0.3, anchorX: -L * 0.15, phase: 0 },
+        // single pair, near back
+      ],
+      eyes: [
+        { pts: makeOval(4, 3.5), rel: [L * 0.3, -W * 0.45] },
+        { pts: makeOval(4, 3.5), rel: [L * 0.3,  W * 0.45] },
+      ],
+      appendages: [
+        { pts: makeWing(55, 22), anchor: [L * 0.0, -W * 0.3], angle: -0.1, z: -1, anim: 'wingFlap', side: 'top' },
+        { pts: makeWing(55, 22), anchor: [L * 0.0,  W * 0.3], angle: 0.1, z: -1, anim: 'wingFlap', side: 'bot' },
+        { pts: makeTail(18, 8), anchor: [-L * 0.45, 0], angle: 0, z: -1, anim: 'none' },
+      ],
+      locomotion: 'fly',
+      speed: 0.9,
+    };
+  },
+
+  quadruped: () => {
+    const L = 150, W = 28;
+    const body = generateBodyOutline(L, t => quadrupedProfile(t, W));
+    const legDefs = [
+      { t: 0.22, phase: 0.0 },
+      { t: 0.75, phase: 0.5 },
+    ];
+    return {
+      label: 'Beast', sub: 'quadruped / mammal',
+      body, bodyLength: L, bodyWidth: W,
+      legs: legDefs.map(ld => ({
+        polygon: makeLeg(26, 10),  // larger, more visible legs
+        xPos: 1 - 2 * ld.t,
+        anchorX: L / 2 - ld.t * L,
+        phase: ld.phase,
+      })),
+      eyes: [
+        { pts: makeOval(5, 4), rel: [L * 0.36, -W * 0.5] },
+        { pts: makeOval(5, 4), rel: [L * 0.36,  W * 0.5] },
+      ],
+      appendages: [
+        { pts: makeTail(35, 7), anchor: [-L * 0.48, 0], angle: 0, z: -1, anim: 'tailSway' },
+      ],
+      locomotion: 'walk',
+      speed: 0.7,
+    };
+  },
+
+  insect: () => {
+    const L = 130;
+    const body = generateBodyOutline(L, insectProfile, 100);
+    const legDefs = [
+      { t: 0.33, phase: 0.0 },
+      { t: 0.38, phase: 0.33 },
+      { t: 0.43, phase: 0.66 },
+    ];
+    return {
+      label: 'Insect', sub: 'six-legged',
+      body, bodyLength: L, bodyWidth: 22,
+      legs: legDefs.map(ld => ({
+        polygon: makeLeg(22, 4),
+        xPos: 1 - 2 * ld.t,
+        anchorX: L / 2 - ld.t * L,
+        phase: ld.phase,
+      })),
+      eyes: [
+        { pts: makeOval(6, 6), rel: [L * 0.42, -11] },
+        { pts: makeOval(6, 6), rel: [L * 0.42,  11] },
+      ],
+      appendages: [
+        { pts: makeAntenna(25, 8), anchor: [L * 0.48, -5], angle: -0.4, z: 1, anim: 'antennaWave', side: 'top' },
+        { pts: makeAntenna(25, -8), anchor: [L * 0.48, 5], angle: 0.4, z: 1, anim: 'antennaWave', side: 'bot' },
+      ],
+      locomotion: 'walk',
+      speed: 0.9,
+    };
+  },
+
+  spider: () => {
+    const L = 110;
+    const body = generateBodyOutline(L, spiderProfile, 90);
+    const legDefs = [
+      { t: 0.16, phase: 0.0 },
+      { t: 0.21, phase: 0.5 },
+      { t: 0.26, phase: 0.25 },
+      { t: 0.31, phase: 0.75 },
+    ];
+    return {
+      label: 'Spider', sub: 'arachnid / eight-legged',
+      body, bodyLength: L, bodyWidth: 24,
+      legs: legDefs.map((ld, i) => ({
+        polygon: makeLeg(28 - i * 2, 4),  // front legs longest
+        xPos: 1 - 2 * ld.t,
+        anchorX: L / 2 - ld.t * L,
+        phase: ld.phase,
+      })),
+      eyes: [
+        { pts: makeOval(3, 3), rel: [L * 0.42, -8] },
+        { pts: makeOval(3, 3), rel: [L * 0.42,  8] },
+        { pts: makeOval(2.5, 2.5), rel: [L * 0.45, -4] },
+        { pts: makeOval(2.5, 2.5), rel: [L * 0.45,  4] },
+      ],
+      appendages: [],
+      locomotion: 'walk',
+      speed: 0.6,
+    };
+  },
+
+  jellyfish: () => {
+    const L = 90, W = 40;
+    const body = generateBodyOutline(L, t => jellyfishProfile(t, W), 80);
+    const rng = mulberry32(42);
+    const tentacles = [];
+    for (let i = 0; i < 6; i++) {
+      const ySpread = lerp(-W * 0.5, W * 0.5, i / 5);
+      tentacles.push({
+        pts: makeTentacle(30 + i * 4, 2),
+        anchor: [-L * 0.25, ySpread],
+        angle: -Math.PI / 2 + (rng() - 0.5) * 0.3,
+        z: -1,
+        anim: 'tentacleWave',
+        tentacleIdx: i,
+      });
+    }
+    return {
+      label: 'Jellyfish', sub: 'aquatic / drifter',
+      body, bodyLength: L, bodyWidth: W,
+      legs: [],
+      eyes: [
+        { pts: makeOval(3, 3), rel: [L * 0.15, -W * 0.3] },
+        { pts: makeOval(3, 3), rel: [L * 0.15,  W * 0.3] },
+      ],
+      appendages: tentacles,
+      locomotion: 'pulse',
+      speed: 0.3,
+    };
+  },
+
+  worm: () => {
+    const L = 200, W = 11;
+    const body = generateBodyOutline(L, t => {
+      // Segmented appearance — more pronounced ridges
+      const base = W * Math.sin(Math.PI * t);
+      const segments = 1 + 0.25 * Math.sin(t * Math.PI * 16);
+      return base * segments;
+    }, 140);
+    return {
+      label: 'Worm', sub: 'segmented crawler',
+      body, bodyLength: L, bodyWidth: W,
+      legs: [],
+      eyes: [
+        { pts: makeOval(3, 2.5), rel: [L * 0.44, -W * 0.3] },
+        { pts: makeOval(3, 2.5), rel: [L * 0.44,  W * 0.3] },
+      ],
+      appendages: [],
+      locomotion: 'inch',
+      speed: 0.4,
+    };
+  },
+};
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION 4b — Public API: Generate Creature from Config
+// ═══════════════════════════════════════════════════════════════
+
+// Main library entry point. Takes a config object and returns
+// a creature definition compatible with the renderer pipeline.
+//
+// Usage:
+//   generateCreature({ preset: 'fish' })
+//   generateCreature({ preset: 'blob', bodyLength: 200 })
+//   generateCreature({
+//     bodyLength: 120, bodyWidth: 30,
+//     profile: 'blob',
+//     legCount: 3, legLength: 20,
+//     eyeCount: 2, eyeSize: 5,
+//     locomotion: 'walk',
+//   })
+
+function generateCreature(config = {}) {
+  // If a preset is given, start from that
+  if (config.preset && PRESETS[config.preset]) {
+    const base = PRESETS[config.preset]();
+    // Override any provided fields
+    if (config.bodyLength || config.bodyWidth) {
+      const L = config.bodyLength || base.bodyLength;
+      const W = config.bodyWidth || base.bodyWidth;
+      const profileFn = {
+        blob: t => blobProfile(t, W),
+        serpent: t => serpentProfile(t, W),
+        fish: t => fishProfile(t, W),
+        bird: t => birdProfile(t, W),
+        quadruped: t => quadrupedProfile(t, W),
+        insect: insectProfile,
+        spider: spiderProfile,
+        jellyfish: t => jellyfishProfile(t, W),
+      }[config.preset] || (t => blobProfile(t, W));
+      base.body = generateBodyOutline(L, profileFn, Math.max(80, L));
+      base.bodyLength = L;
+      base.bodyWidth = W;
+    }
+    if (config.speed !== undefined) base.speed = config.speed;
+    if (config.locomotion) base.locomotion = config.locomotion;
+    return base;
+  }
+
+  // Full custom creature from parameters
+  const L = config.bodyLength || 120;
+  const W = config.bodyWidth || 30;
+  const profile = config.profile || 'blob';
+
+  const profileFns = {
+    blob: t => blobProfile(t, W),
+    serpent: t => serpentProfile(t, W),
+    fish: t => fishProfile(t, W),
+    bird: t => birdProfile(t, W),
+    quadruped: t => quadrupedProfile(t, W),
+    insect: insectProfile,
+    spider: spiderProfile,
+    jellyfish: t => jellyfishProfile(t, W),
+  };
+  const widthFn = profileFns[profile] || profileFns.blob;
+  const body = generateBodyOutline(L, widthFn, Math.max(80, L));
+
+  // Legs
+  const legCount = config.legCount || 0;
+  const legLength = config.legLength || 16;
+  const legWidth = config.legWidth || 5;
+  const legs = [];
+  for (let i = 0; i < legCount; i++) {
+    const t = 0.2 + (i / Math.max(legCount - 1, 1)) * 0.6;
+    legs.push({
+      polygon: makeLeg(legLength, legWidth),
+      xPos: 1 - 2 * t,
+      anchorX: L / 2 - t * L,
+      phase: i / legCount,
+    });
+  }
+
+  // Eyes
+  const eyeCount = config.eyeCount || 2;
+  const eyeSize = config.eyeSize || 5;
+  const eyes = [];
+  if (eyeCount === 1) {
+    eyes.push({ pts: makeOval(eyeSize, eyeSize * 0.8), rel: [L * 0.38, 0] });
+  } else {
+    for (let i = 0; i < eyeCount; i++) {
+      const lat = (i - (eyeCount - 1) / 2) * (W * 0.5);
+      eyes.push({ pts: makeOval(eyeSize, eyeSize * 0.8), rel: [L * 0.38, lat] });
+    }
+  }
+
+  return {
+    label: config.label || 'Custom',
+    sub: config.sub || 'user-defined',
+    body, bodyLength: L, bodyWidth: W,
+    legs, eyes,
+    appendages: config.appendages || [],
+    locomotion: config.locomotion || (legCount > 0 ? 'walk' : 'slither'),
+    speed: config.speed || 0.6,
+  };
+}
+
+// Convert creature to game-compatible SHAPES format
+// (compatible with shared/shapes.ts and CreatureRenderer)
+function toGameShape(creature) {
+  const halfLen = creature.bodyLength / 2;
+  return {
+    id: (creature.label || 'custom').toLowerCase().replace(/\s+/g, '-'),
+    body: creature.body,
+    eyes: creature.eyes.map((eye, i) => ({
+      id: 'eye' + (i + 1),
+      points: eye.pts.map(([x, y]) => [x + 111.5, y + 72.5]), // match game offset convention
+      centerY: 72.5,
+      rel: eye.rel,
+    })),
+    legs: creature.legs.map(leg => ({
+      xPos: leg.xPos,
+      phase: leg.phase,
+    })),
+    width: creature.bodyLength,
+    height: creature.bodyWidth * 2,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION 5 — Locomotion / Body Deformation
+// ═══════════════════════════════════════════════════════════════
+
+function deformWalk(pts, bodyLen, walkPhase, speed, legs) {
+  const halfLen = bodyLen / 2;
+  return pts.map(([px, py]) => {
+    const bodyPos = px / halfLen; // -1..1
+    // Body undulation — lateral S-curve, fades near head
+    const headFade = clamp((-bodyPos + 0.8) / 1.2, 0, 1);
+    const undulate = Math.sin(Math.PI * 2 * (0.8 * bodyPos - walkPhase))
+                     * 3 * speed * headFade;
+    let nx = px, ny = py + undulate;
+
+    // Per-leg stretch
+    for (const leg of legs) {
+      const dx = bodyPos - leg.xPos;
+      const sigma = 0.015;
+      const inf = Math.exp(-(dx * dx) / sigma);
+      if (inf < 0.01) continue;
+
+      const isTop = py < 0;
+      const legPhase = (walkPhase + leg.phase + (isTop ? 0 : 0.5)) % 1;
+      const duty = 0.65;
+      const isSwing = legPhase >= duty;
+      const phaseT = isSwing ? (legPhase - duty) / (1 - duty) : legPhase / duty;
+      const sideFactor = clamp((Math.abs(py) - 10) / 15, 0, 1);
+
+      let stretch, reach;
+      if (isSwing) {
+        const pk = Math.sin(phaseT * Math.PI);
+        stretch = 10 * pk;
+        reach = 5 * 1.5 * ease(phaseT);
+      } else {
+        const pk = Math.sin(phaseT * Math.PI);
+        stretch = -10 * 0.3 * pk;
+        reach = 5 * 1.5 * (1 - phaseT) - 5 * 0.5;
+      }
+      const i = inf * sideFactor * speed;
+      ny += (py > 0 ? stretch : -stretch) * i;
+      nx += reach * i;
+    }
+    return [nx, ny];
+  });
+}
+
+function deformSlither(pts, bodyLen, time) {
+  const halfLen = bodyLen / 2;
+  return pts.map(([px, py]) => {
+    const t = (px + halfLen) / bodyLen; // 0..1 tail→head
+    // Traveling sine wave: larger at tail, smaller at head
+    const amp = 18 * (1 - t * 0.5);
+    const freq = 2.0;
+    const offset = amp * Math.sin(freq * Math.PI * 2 * t - time * 4);
+    // Rotate body points to follow curve
+    const deriv = amp * freq * Math.PI * 2 *
+                  Math.cos(freq * Math.PI * 2 * t - time * 4) / bodyLen;
+    const angle = Math.atan2(deriv, 1);
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    return [px - py * sin, offset + py * cos];
+  });
+}
+
+function deformSwim(pts, bodyLen, time) {
+  const halfLen = bodyLen / 2;
+  return pts.map(([px, py]) => {
+    const t = (px + halfLen) / bodyLen; // 0..1 tail→head
+    // Tail oscillation: only tail 40%
+    const tailFactor = clamp((0.4 - t) / 0.4, 0, 1);
+    const amp = 14 * tailFactor * tailFactor;
+    const offset = amp * Math.sin(time * 5);
+    return [px, py + offset];
+  });
+}
+
+function deformPulse(pts, bodyLen, time) {
+  // Jellyfish bell pulsation
+  const pulse = 1 + 0.08 * Math.sin(time * 3);
+  const bob = 2 * Math.sin(time * 1.5);
+  return pts.map(([px, py]) => {
+    const t = clamp(px / (bodyLen / 2), -1, 1); // head-tail position
+    // Expand/contract laterally, more at the bottom
+    const factor = t < 0 ? pulse : 1 + (pulse - 1) * 0.3;
+    return [px, py * factor + bob];
+  });
+}
+
+function deformInch(pts, bodyLen, time) {
+  // Inchworm: compression wave
+  const halfLen = bodyLen / 2;
+  return pts.map(([px, py]) => {
+    const t = (px + halfLen) / bodyLen;
+    const wave = 4 * Math.sin(t * Math.PI * 3 - time * 3);
+    const compress = 1 + 0.05 * Math.sin(t * Math.PI * 3 - time * 3);
+    return [px * compress, py + wave * 0.4];
+  });
+}
+
+function deformFly(pts, time) {
+  // Slight body bob
+  const bob = 2 * Math.sin(time * 6);
+  return pts.map(([px, py]) => [px, py + bob]);
+}
+
+// Breathing overlay (all creatures)
+function deformBreathe(pts, bodyLen, time, legs) {
+  const halfLen = bodyLen / 2;
+  const xMin = -halfLen;
+  const xRange = bodyLen;
+  return pts.map(([px, py]) => {
+    const bodyPos = px / halfLen;
+    const norm = 1 - (px - xMin) / xRange;
+    const wavePos = (time * 0.7) % 1.3 - 0.15;
+    const dist = norm - wavePos;
+    let bump = 0;
+    if (Math.abs(dist) < 0.35) {
+      bump = (1 + Math.cos((dist / 0.35) * Math.PI)) / 2;
+    }
+    // Only at leg positions (or edges)
+    let legInf = 0.3; // baseline
+    if (legs) {
+      for (const leg of legs) {
+        const dx = bodyPos - leg.xPos;
+        legInf = Math.max(legInf, Math.exp(-(dx * dx) / 0.015));
+      }
+    }
+    const tipFactor = clamp((Math.abs(py) - 8) / 15, 0, 1);
+    const stretch = bump * 4 * legInf * tipFactor;
+    return [px, py + (py > 0 ? stretch : -stretch)];
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION 6 — Rendering
+// ═══════════════════════════════════════════════════════════════
+
+function drawSmoothPoly(ctx, pts, fill) {
+  const n = pts.length;
+  if (n < 3) return;
+  ctx.beginPath();
+  const mx0 = (pts[n - 1][0] + pts[0][0]) / 2;
+  const my0 = (pts[n - 1][1] + pts[0][1]) / 2;
+  ctx.moveTo(mx0, my0);
+  for (let i = 0; i < n; i++) {
+    const c = pts[i];
+    const nx = pts[(i + 1) % n];
+    ctx.quadraticCurveTo(c[0], c[1], (c[0] + nx[0]) / 2, (c[1] + nx[1]) / 2);
+  }
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+}
+
+function drawPoly(ctx, pts, fill) {
+  if (pts.length < 3) return;
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION 7 — Creature Instance (animation state + draw)
+// ═══════════════════════════════════════════════════════════════
+
+class CreatureInstance {
+  constructor(preset) {
+    this.data = PRESETS[preset]();
+    this.time = Math.random() * 100;
+    this.walkPhase = Math.random();
+    this.breathTime = Math.random() * 10;
+    this.blinkTimer = Math.random() * 4;
+    this.blinkInterval = 3.5 + Math.random() * 2;
+    this.blinkDur = 0.18;
+    this.globalSpeed = 1;
+  }
+
+  update(dt) {
+    const spd = this.data.speed * this.globalSpeed;
+    this.time += dt * spd;
+    this.walkPhase = (this.walkPhase + dt * spd * 1.2) % 1;
+    this.breathTime += dt;
+    this.blinkTimer += dt;
+  }
+
+  draw(ctx, cx, cy, scale) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(scale, scale);
+
+    const d = this.data;
+    let bodyPts = d.body.map(p => [p[0], p[1]]);
+
+    // Apply locomotion deformation
+    switch (d.locomotion) {
+      case 'walk':
+        bodyPts = deformWalk(bodyPts, d.bodyLength, this.walkPhase, d.speed, d.legs);
+        break;
+      case 'slither':
+        bodyPts = deformSlither(bodyPts, d.bodyLength, this.time);
+        break;
+      case 'swim':
+        bodyPts = deformSwim(bodyPts, d.bodyLength, this.time);
+        break;
+      case 'fly':
+        bodyPts = deformFly(bodyPts, this.time);
+        break;
+      case 'pulse':
+        bodyPts = deformPulse(bodyPts, d.bodyLength, this.time);
+        break;
+      case 'inch':
+        bodyPts = deformInch(bodyPts, d.bodyLength, this.time);
+        break;
+    }
+
+    // Breathing overlay
+    bodyPts = deformBreathe(bodyPts, d.bodyLength, this.breathTime, d.legs);
+
+    // Shadow for flying creatures
+    if (d.locomotion === 'fly') {
+      ctx.save();
+      ctx.globalAlpha = 0.15;
+      ctx.translate(0, 35);
+      ctx.scale(1, 0.3);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, d.bodyLength * 0.35, d.bodyWidth * 0.6, 0, 0, Math.PI * 2);
+      ctx.fillStyle = '#000';
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Draw appendages behind body (z < 0)
+    this.drawAppendages(ctx, d, -1);
+
+    // Draw legs (mirrored top/bottom)
+    this.drawLegs(ctx, d);
+
+    // Draw body
+    drawSmoothPoly(ctx, bodyPts, '#111');
+
+    // Draw appendages in front (z > 0)
+    this.drawAppendages(ctx, d, 1);
+
+    // Draw eyes
+    this.drawEyes(ctx, d);
+
+    // Draw mouth
+    this.drawMouth(ctx, d);
+
+    ctx.restore();
+  }
+
+  drawLegs(ctx, d) {
+    for (const leg of d.legs) {
+      // Find actual body width at this leg's x position
+      const t = (d.bodyLength / 2 - leg.anchorX) / d.bodyLength; // 0=head, 1=tail
+      let bodyW = d.bodyWidth || 20;
+      // Sample the body outline to find width at this x
+      let minDist = Infinity;
+      for (const p of d.body) {
+        const dx = Math.abs(p[0] - leg.anchorX);
+        if (dx < minDist && p[1] > 0) { minDist = dx; bodyW = Math.abs(p[1]); }
+      }
+
+      // Animate leg extension
+      const legPhaseTop = (this.walkPhase + leg.phase) % 1;
+      const legPhaseBot = (this.walkPhase + leg.phase + 0.5) % 1;
+      const swingTop = Math.sin(legPhaseTop * Math.PI * 2) * 0.35;
+      const swingBot = Math.sin(legPhaseBot * Math.PI * 2) * 0.35;
+
+      // Top leg (attaches at body edge)
+      ctx.save();
+      ctx.translate(leg.anchorX, -(bodyW - 1));
+      ctx.rotate(-Math.PI / 2 + swingTop);
+      drawPoly(ctx, leg.polygon, '#000');
+      ctx.restore();
+
+      // Bottom leg
+      ctx.save();
+      ctx.translate(leg.anchorX, bodyW - 1);
+      ctx.rotate(Math.PI / 2 + swingBot);
+      drawPoly(ctx, leg.polygon, '#000');
+      ctx.restore();
+    }
+  }
+
+  drawAppendages(ctx, d, zFilter) {
+    for (const app of d.appendages) {
+      if ((app.z || -1) !== zFilter) continue;
+      ctx.save();
+      ctx.translate(app.anchor[0], app.anchor[1]);
+
+      let extraAngle = 0;
+      let extraScaleY = 1;
+
+      // Animate appendages
+      switch (app.anim) {
+        case 'wingFlap': {
+          const flapCycle = Math.sin(this.time * 7);
+          // Wings extend outward on downstroke, retract on upstroke
+          extraScaleY = 0.5 + 0.5 * (0.5 + 0.5 * flapCycle);
+          // Slight forward/back sweep
+          extraAngle = flapCycle * 0.12;
+          break;
+        }
+        case 'tailOsc': {
+          const tailSwing = Math.sin(this.time * 5);
+          extraAngle = tailSwing * 0.4;
+          // Also translate to follow body deformation
+          ctx.translate(0, tailSwing * 10);
+          break;
+        }
+        case 'tailSway': {
+          extraAngle = Math.sin(this.time * 2.5) * 0.3;
+          break;
+        }
+        case 'finFlutter': {
+          extraAngle = Math.sin(this.time * 4 + (app.side === 'bot' ? Math.PI : 0)) * 0.2;
+          break;
+        }
+        case 'antennaWave': {
+          extraAngle = Math.sin(this.time * 2 + (app.side === 'bot' ? 1 : 0)) * 0.15;
+          break;
+        }
+        case 'tentacleWave': {
+          const idx = app.tentacleIdx || 0;
+          extraAngle = Math.sin(this.time * 1.5 + idx * 0.8) * 0.25;
+          break;
+        }
+      }
+
+      ctx.rotate((app.angle || 0) + extraAngle);
+      if (extraScaleY !== 1) ctx.scale(1, extraScaleY);
+
+      // Mirror for bottom-side appendages
+      if (app.side === 'bot') ctx.scale(1, -1);
+
+      drawPoly(ctx, app.pts, '#0a0a0a');
+      ctx.restore();
+    }
+  }
+
+  drawEyes(ctx, d) {
+    // Blink
+    const bc = this.blinkTimer % this.blinkInterval;
+    let openness = 1;
+    if (bc < this.blinkDur) {
+      const half = this.blinkDur / 2;
+      openness = bc < half ? 1 - ease(bc / half) : ease((bc - half) / half);
+    }
+
+    for (const eye of d.eyes) {
+      ctx.save();
+      ctx.translate(eye.rel[0], eye.rel[1]);
+      ctx.scale(1, openness);
+      drawSmoothPoly(ctx, eye.pts, '#fff');
+      // Pupil
+      ctx.fillStyle = '#000';
+      ctx.beginPath();
+      const pw = eye.pts[0] ? Math.abs(eye.pts[0][0]) * 0.35 : 2;
+      ctx.arc(pw * 0.3, 0, pw, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  drawMouth(ctx, d) {
+    // Small mouth at head tip
+    const mouthX = d.bodyLength * 0.48;
+    ctx.save();
+    ctx.translate(mouthX, 0);
+    ctx.beginPath();
+    ctx.arc(0, 0, 3, 0.2, Math.PI - 0.2);
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION 8 — Gallery Setup & Animation Loop
+// ═══════════════════════════════════════════════════════════════
+
+const CREATURE_TYPES = Object.keys(PRESETS);
+let creatures = [];
+let speedMultiplier = 1;
+
+function buildGallery() {
+  const gallery = document.getElementById('gallery');
+  gallery.innerHTML = '';
+  creatures = [];
+
+  for (const type of CREATURE_TYPES) {
+    const card = document.createElement('div');
+    card.className = 'card';
+
+    const canvas = document.createElement('canvas');
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = 440 * dpr;
+    canvas.height = 320 * dpr;
+    canvas.style.width = '440px';
+    canvas.style.height = '320px';
+    card.appendChild(canvas);
+
+    const label = document.createElement('div');
+    label.className = 'card-label';
+    label.textContent = PRESETS[type]().label;
+    card.appendChild(label);
+
+    const sub = document.createElement('div');
+    sub.className = 'card-sub';
+    sub.textContent = PRESETS[type]().sub;
+    card.appendChild(sub);
+
+    gallery.appendChild(card);
+
+    const inst = new CreatureInstance(type);
+    inst.canvas = canvas;
+    inst.ctx = canvas.getContext('2d');
+    inst.dpr = dpr;
+    creatures.push(inst);
+  }
+}
+
+let prevTime = 0;
+
+function frame(timestamp) {
+  const dt = Math.min((timestamp - prevTime) / 1000, 0.05);
+  prevTime = timestamp;
+
+  for (const c of creatures) {
+    c.globalSpeed = speedMultiplier;
+    c.update(dt);
+
+    const ctx = c.ctx;
+    const dpr = c.dpr || 1;
+    const w = c.canvas.width / dpr;
+    const h = c.canvas.height / dpr;
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, w, h);
+
+    // Background
+    ctx.fillStyle = '#0a0a1a';
+    ctx.fillRect(0, 0, w, h);
+
+    // Subtle grid
+    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x < w; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+    for (let y = 0; y < h; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+
+    // Calculate scale to fit creature in card
+    const maxDim = Math.max(c.data.bodyLength, (c.data.bodyWidth || 40) * 2);
+    const appendageReach = c.data.legs.length > 0 ? 30 : c.data.appendages.some(a => a.anim === 'wingFlap') ? 60 : 0;
+    const effectiveDim = maxDim + appendageReach;
+    const scale = Math.min(w * 0.55 / effectiveDim, h * 0.5 / effectiveDim, 2.5);
+
+    c.draw(ctx, w / 2, h / 2 - 10, scale);
+
+    // Stats bar
+    const d = c.data;
+    const legCount = d.legs.length * 2;
+    const eyeCount = d.eyes.length;
+    const stats = `${legCount} legs \u00b7 ${eyeCount} eyes \u00b7 ${d.locomotion}`;
+    ctx.fillStyle = '#444';
+    ctx.font = '11px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(stats, w / 2, h - 12);
+    ctx.restore();
+  }
+
+  requestAnimationFrame(frame);
+}
+
+function toggleSpeed() {
+  speedMultiplier = speedMultiplier === 1 ? 0.3 : speedMultiplier === 0.3 ? 2 : 1;
+}
+
+function regenerateAll() {
+  creatures.forEach((c, i) => {
+    const type = CREATURE_TYPES[i];
+    const newData = PRESETS[type]();
+    c.data = newData;
+  });
+}
+
+// Boot
+buildGallery();
+requestAnimationFrame(frame);
+
+</script>
+</body>
+</html>
