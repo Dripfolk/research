@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shadow Creature</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #fff; overflow: hidden; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <script>
+    const cv = document.getElementById('c');
+    const ctx = cv.getContext('2d');
+    let W, H;
+    function resize() { W = cv.width = window.innerWidth; H = cv.height = window.innerHeight; }
+    resize();
+    window.addEventListener('resize', resize);
+
+    // ── LOCKED BASE SHAPE (200 pts, centered at 0,0) ──
+    const BASE = [[-74.4,-1.19],[-73.98,-3.08],[-73.52,-4.96],[-72.7,-6.71],[-71.83,-8.44],[-70.76,-10.05],[-69.68,-11.65],[-68.58,-13.25],[-67.44,-14.81],[-66.26,-16.35],[-65.04,-17.85],[-63.79,-19.32],[-62.49,-20.76],[-61.16,-22.17],[-59.82,-23.57],[-58.45,-24.94],[-57.06,-26.28],[-55.64,-27.59],[-54.17,-28.85],[-52.63,-30.02],[-51.01,-31.08],[-49.34,-32.05],[-47.62,-32.94],[-45.82,-33.64],[-43.94,-34.1],[-42.01,-34.29],[-40.08,-34.39],[-38.14,-34.39],[-36.21,-34.39],[-34.27,-34.39],[-32.37,-34.72],[-30.6,-35.49],[-29.08,-36.66],[-27.73,-38.03],[-26.52,-39.55],[-25.29,-41.04],[-24.05,-42.53],[-22.59,-43.79],[-20.92,-44.72],[-19.06,-45.23],[-17.14,-45.35],[-15.21,-45.21],[-13.29,-44.98],[-11.38,-44.67],[-9.48,-44.26],[-7.61,-43.77],[-5.76,-43.21],[-3.93,-42.57],[-2.08,-42.01],[-0.15,-41.9],[1.77,-42.16],[3.55,-42.89],[5.32,-43.68],[7.1,-44.43],[8.96,-44.93],[10.88,-45.0],[12.75,-44.59],[14.5,-43.79],[16.16,-42.79],[17.78,-41.73],[19.37,-40.63],[20.89,-39.43],[22.36,-38.17],[23.8,-36.87],[25.43,-35.83],[27.26,-35.36],[29.13,-35.68],[30.87,-36.51],[32.55,-37.46],[34.3,-38.28],[36.16,-38.81],[38.07,-39.08],[39.99,-38.79],[41.81,-38.16],[43.46,-37.14],[44.96,-35.93],[46.36,-34.59],[47.66,-33.16],[48.94,-31.71],[50.21,-30.24],[51.44,-28.76],[52.7,-27.28],[53.97,-25.82],[55.27,-24.39],[56.57,-22.96],[57.88,-21.53],[59.24,-20.15],[60.61,-18.78],[61.98,-17.41],[63.28,-15.98],[64.58,-14.55],[65.88,-13.12],[67.16,-11.66],[68.45,-10.22],[69.78,-8.82],[71.12,-7.42],[72.35,-5.93],[73.36,-4.28],[73.95,-2.45],[74.4,-0.57],[74.23,1.36],[73.96,3.26],[73.22,5.05],[72.17,6.65],[70.9,8.11],[69.53,9.48],[68.18,10.87],[66.86,12.28],[65.62,13.76],[64.35,15.22],[63.05,16.66],[61.68,18.03],[60.3,19.38],[58.9,20.72],[57.56,22.12],[56.25,23.54],[54.95,24.97],[53.68,26.43],[52.41,27.89],[51.14,29.35],[49.84,30.79],[48.55,32.23],[47.28,33.69],[45.96,35.11],[44.57,36.45],[43.06,37.66],[41.34,38.54],[39.49,39.09],[37.56,39.21],[35.66,38.94],[33.8,38.39],[32.05,37.59],[30.35,36.65],[28.62,35.83],[26.73,35.6],[24.92,36.27],[23.37,37.43],[21.82,38.59],[20.25,39.73],[18.66,40.83],[17.04,41.88],[15.45,42.99],[13.81,44.02],[12.05,44.79],[10.16,45.11],[8.26,44.89],[6.43,44.25],[4.67,43.46],[2.9,42.67],[1.07,42.03],[-0.86,41.92],[-2.77,42.17],[-4.63,42.7],[-6.49,43.26],[-8.36,43.75],[-10.24,44.22],[-12.13,44.63],[-14.02,45.01],[-15.94,45.3],[-17.87,45.45],[-19.78,45.32],[-21.58,44.66],[-23.19,43.61],[-24.53,42.21],[-25.74,40.71],[-26.9,39.15],[-28.07,37.61],[-29.32,36.14],[-30.79,34.89],[-32.54,34.09],[-34.44,33.91],[-36.36,34.11],[-38.29,34.34],[-40.22,34.41],[-42.14,34.24],[-44.02,33.8],[-45.85,33.17],[-47.64,32.42],[-49.39,31.6],[-51.08,30.66],[-52.7,29.6],[-54.26,28.46],[-55.79,27.27],[-57.29,26.05],[-58.73,24.75],[-60.08,23.37],[-61.4,21.95],[-62.67,20.49],[-63.89,18.99],[-65.1,17.48],[-66.25,15.92],[-67.39,14.36],[-68.52,12.78],[-69.63,11.2],[-70.73,9.61],[-71.74,7.96],[-72.73,6.29],[-73.42,4.49],[-74.05,2.66],[-74.24,0.74]];
+
+    // ── LOCKED EYES ──
+    const EYE1 = [[103.3,15.0],[104.0,14.0],[105.0,13.0],[106.0,12.0],[107.0,11.0],[108.0,12.3],[109.0,14.3],[110.0,17.0],[111.0,17.7],[112.0,18.0],[113.0,18.0],[114.0,18.0],[115.0,17.7],[116.0,17.3],[117.0,17.0],[118.0,16.7],[119.0,16.0],[119.7,15.7],[119.7,16.7],[119.0,18.7],[118.0,20.3],[117.0,21.7],[116.0,22.3],[115.0,23.0],[114.0,23.0],[113.0,23.0],[112.0,23.3],[111.0,23.7],[110.0,23.7],[109.0,23.3],[108.0,22.7],[107.0,22.0],[106.0,21.0],[105.0,19.7],[104.0,18.0],[103.3,16.3]];
+    const EYE2 = [[103.3,74.3],[104.0,72.3],[105.0,70.3],[106.0,69.3],[107.0,68.7],[108.0,68.3],[109.0,67.7],[110.0,67.3],[111.0,67.3],[112.0,67.7],[113.0,68.0],[114.0,68.0],[115.0,68.3],[116.0,69.0],[117.0,70.0],[118.0,71.3],[119.0,73.7],[119.7,75.7],[119.7,76.3],[119.0,75.7],[118.0,74.7],[117.0,74.3],[116.0,73.7],[115.0,73.3],[114.0,73.0],[113.0,73.0],[112.0,73.0],[111.0,73.3],[110.0,73.7],[109.0,74.3],[108.0,76.3],[107.0,78.0],[106.0,79.0],[105.0,78.0],[104.0,77.0],[103.3,76.0]];
+    const EYE1_REL = [35.5, -26.7];
+    const EYE2_REL = [35.5, 26.8];
+
+    const N = 200;
+    const sc = 3;
+    function ease(t) { return t < .5 ? 4*t*t*t : 1 - Math.pow(-2*t+2,3)/2; }
+    function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+    function lerp(a, b, t) { return a + (b - a) * t; }
+
+    // ══════════════════════════════════════════
+    // CREATURE STATE
+    // ══════════════════════════════════════════
+    let creatureX = 0, creatureY = 0; // world position
+    let creatureAngle = 0;            // facing direction (radians)
+    let speed = 0;                    // current speed
+    let walkPhase = 0;                // walk cycle phase
+    let breathTime = 0;
+
+    // Mouse
+    let mx = 0, my = 0;
+    window.addEventListener('mousemove', e => { mx = e.clientX; my = e.clientY; });
+
+    // Blink
+    const blink = { timer: 0, interval: 4.0, dur: 0.2 };
+
+    // ══════════════════════════════════════════
+    // WALKING PARAMETERS
+    // ══════════════════════════════════════════
+    const MAX_SPEED = 60;        // px/sec
+    const ACCEL = 200;           // px/sec²
+    const DECEL = 300;           // px/sec²
+    const TURN_SPEED = 3.0;     // rad/sec
+    const BODY_RADIUS = 75 * sc; // creature body reach in screen pixels
+    const HEAD_OFFSET = 74 * sc; // head tip distance from center
+    const WALK_CYCLE_SPEED = 1.2; // cycles per second at max speed
+
+    // Leg definitions: 4 pairs — exact positions from pixel-traced outline
+    // Each leg is a bump on the body edge. We know their exact x positions.
+    // Top edge (creature's left): bumps at x = -40.1, -17.1, +10.9, +38.1
+    // Bottom edge (creature's right): bumps at x = +37.6, +10.2, -17.9, -40.2
+    // bodyPos = x / 75 → normalized positions:
+    const LEG_PAIRS = [
+      { xPos: -0.535, phase: 0.0  },  // Pair 4 (rear/tail) x≈-40
+      { xPos: -0.228, phase: 0.2  },  // Pair 3             x≈-17
+      { xPos:  0.145, phase: 0.4  },  // Pair 2             x≈+11
+      { xPos:  0.505, phase: 0.6  },  // Pair 1 (front/head)x≈+38
+    ];
+    const LEG_STRETCH = 10;     // how much each leg elongates outward
+    const LEG_STRIDE = 5;       // forward/back reach during walk
+    const STANCE_DUTY = 0.65;
+    const LEG_SIGMA = 0.012;    // tight Gaussian — each leg is independent
+
+    // Body undulation
+    const UNDULATE_AMP = 3;     // lateral amplitude (shape units)
+    const UNDULATE_WAVES = 0.8; // waves along body length
+
+    // ══════════════════════════════════════════
+    // WALKING GAIT — legs stretch longer/shorter, not wider
+    // ══════════════════════════════════════════
+
+    function applyWalkDeform(pts, phase, speedNorm) {
+      const out = [];
+      for (let i = 0; i < pts.length; i++) {
+        let px = pts[i][0], py = pts[i][1];
+        const bodyPos = px / 75; // -1 (tail) to +1 (head)
+
+        // ── 1. Body undulation (lateral S-curve) ──
+        // Fade out near head (+x) so head stays stable
+        const headFade = clamp01((-bodyPos + 0.8) / 1.2); // 0 at head, 1 at tail
+        const undulate = Math.sin(
+          Math.PI * 2 * (UNDULATE_WAVES * bodyPos - phase)
+        ) * UNDULATE_AMP * speedNorm * headFade;
+        py += undulate;
+
+        // ── 2. Individual leg stretch ──
+        // Each of the 8 legs independently gets LONGER (extends) or SHORTER (retracts)
+        for (const pair of LEG_PAIRS) {
+          const dx = bodyPos - pair.xPos;
+          // Tight Gaussian — only affects points right at this leg bump
+          const influence = Math.exp(-(dx * dx) / LEG_SIGMA);
+          if (influence < 0.01) continue;
+
+          const isTop = py < 0;
+          const legPhase = (phase + pair.phase + (isTop ? 0 : 0.5)) % 1;
+
+          const isSwing = legPhase >= STANCE_DUTY;
+          const phaseT = isSwing
+            ? (legPhase - STANCE_DUTY) / (1 - STANCE_DUTY)
+            : legPhase / STANCE_DUTY;
+
+          // Only the leg tip points (large |py|)
+          const sideFactor = clamp01((Math.abs(py) - 15) / 15); // starts affecting at |py|>15
+
+          // ── Leg stretches diagonally: outward + forward during swing ──
+          let stretch, forwardReach;
+          if (isSwing) {
+            const peak = Math.sin(phaseT * Math.PI);
+            stretch = LEG_STRETCH * peak;              // extend outward
+            forwardReach = LEG_STRIDE * 1.5 * ease(phaseT); // reach forward (+x = head direction)
+          } else {
+            const peak = Math.sin(phaseT * Math.PI);
+            stretch = -LEG_STRETCH * 0.3 * peak;       // slight retract
+            forwardReach = LEG_STRIDE * 1.5 * (1 - phaseT) - LEG_STRIDE * 0.5; // drag backward
+          }
+
+          const inf = influence * sideFactor * speedNorm;
+
+          // Outward stretch (leg gets longer)
+          py += (py > 0 ? stretch : -stretch) * inf;
+
+          // Forward/backward reach (leg angles toward movement direction)
+          px += forwardReach * inf;
+        }
+
+        out.push([px, py]);
+      }
+      return out;
+    }
+
+    // ══════════════════════════════════════════
+    // BREATHING (unchanged from before)
+    // ══════════════════════════════════════════
+    const BREATH_SPEED = 0.7;
+    const BREATH_AMP = 5;
+    const BREATH_WIDTH = 0.35;
+
+    function applyBreathWave(pts, t) {
+      const xMin = -75, xMax = 75, xRange = xMax - xMin;
+      const out = [];
+      for (let i = 0; i < pts.length; i++) {
+        let px = pts[i][0], py = pts[i][1];
+        const bodyPos = px / 75;
+        const norm = 1 - (px - xMin) / xRange;
+        const wavePos = (t * BREATH_SPEED) % 1.3 - 0.15;
+        const dist = norm - wavePos;
+        let bump = 0;
+        if (Math.abs(dist) < BREATH_WIDTH) {
+          bump = (1 + Math.cos(dist / BREATH_WIDTH * Math.PI)) / 2;
+        }
+
+        // Only stretch the actual leg bumps, not the whole side
+        // Check proximity to each leg pair position
+        let legInfluence = 0;
+        for (const pair of LEG_PAIRS) {
+          const dx = bodyPos - pair.xPos;
+          legInfluence = Math.max(legInfluence, Math.exp(-(dx * dx) / LEG_SIGMA));
+        }
+
+        // Leg tip factor
+        const tipFactor = clamp01((Math.abs(py) - 15) / 15);
+
+        // Stretch: leg bumps get longer during breath wave
+        const stretch = bump * BREATH_AMP * legInfluence * tipFactor;
+        py += (py > 0 ? stretch : -stretch);
+
+        out.push([px, py]);
+      }
+      return out;
+    }
+
+    // ══════════════════════════════════════════
+    // SHAPE PIPELINE
+    // ══════════════════════════════════════════
+
+    function getCurrentShape(t, walkPh, speedN) {
+      let pts = BASE.map(p => [p[0], p[1]]); // copy
+      pts = applyWalkDeform(pts, walkPh, speedN);
+      pts = applyBreathWave(pts, t);
+      return pts;
+    }
+
+    // ══════════════════════════════════════════
+    // DRAWING
+    // ══════════════════════════════════════════
+
+    function drawSmoothTransformed(pts, ox, oy, angle) {
+      const n = pts.length;
+      const cos = Math.cos(angle), sin = Math.sin(angle);
+
+      ctx.beginPath();
+      function tx(p) { return ox + (p[0] * cos - p[1] * sin) * sc; }
+      function ty(p) { return oy + (p[0] * sin + p[1] * cos) * sc; }
+
+      const lx = (pts[n-1][0]+pts[0][0])/2, ly = (pts[n-1][1]+pts[0][1])/2;
+      ctx.moveTo(ox + (lx*cos - ly*sin)*sc, oy + (lx*sin + ly*cos)*sc);
+
+      for (let i = 0; i < n; i++) {
+        const cur = pts[i], nxt = pts[(i+1) % n];
+        const mx2 = (cur[0]+nxt[0])/2, my2 = (cur[1]+nxt[1])/2;
+        ctx.quadraticCurveTo(tx(cur), ty(cur), ox+(mx2*cos-my2*sin)*sc, oy+(mx2*sin+my2*cos)*sc);
+      }
+      ctx.closePath();
+      ctx.fillStyle = '#000';
+      ctx.fill();
+    }
+
+    function drawEyeTransformed(eyePts, relCy, ox, oy, angle, eox, eoy, openness) {
+      if (eyePts.length < 3 || openness < 0.01) return;
+      const cos = Math.cos(angle), sin = Math.sin(angle);
+      const scaled = eyePts.map(p => [(p[0]-111.5), (p[1]-relCy)*openness]);
+      const n = scaled.length;
+
+      ctx.beginPath();
+      function tx(p) { return eox + (p[0]*cos - p[1]*sin)*sc; }
+      function ty(p) { return eoy + (p[0]*sin + p[1]*cos)*sc; }
+
+      const lx = (scaled[n-1][0]+scaled[0][0])/2, ly = (scaled[n-1][1]+scaled[0][1])/2;
+      ctx.moveTo(eox+(lx*cos-ly*sin)*sc, eoy+(lx*sin+ly*cos)*sc);
+
+      for (let i = 0; i < n; i++) {
+        const cur = scaled[i], nxt = scaled[(i+1)%n];
+        const mx2 = (cur[0]+nxt[0])/2, my2 = (cur[1]+nxt[1])/2;
+        ctx.quadraticCurveTo(tx(cur), ty(cur), eox+(mx2*cos-my2*sin)*sc, eoy+(mx2*sin+my2*cos)*sc);
+      }
+      ctx.closePath();
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+    }
+
+    // ══════════════════════════════════════════
+    // MAIN LOOP
+    // ══════════════════════════════════════════
+
+    // Start in center
+    creatureX = W / 2;
+    creatureY = H / 2;
+    mx = W / 2;
+    my = H / 2;
+
+    let prev = 0;
+    function frame(ts) {
+      const dt = Math.min((ts - prev) / 1000, 0.05);
+      prev = ts;
+
+      // ── Movement toward mouse ──
+      const dx = mx - creatureX;
+      const dy = my - creatureY;
+      const distToMouse = Math.sqrt(dx*dx + dy*dy);
+      const targetAngle = Math.atan2(dy, dx);
+
+      // Where is the head in world space?
+      const headX = creatureX + Math.cos(creatureAngle) * HEAD_OFFSET;
+      const headY = creatureY + Math.sin(creatureAngle) * HEAD_OFFSET;
+      const mouseToHead = Math.sqrt((mx-headX)**2 + (my-headY)**2);
+
+      // Mouse on body = no movement at all (no turning, no walking)
+      const mouseOnBody = distToMouse < BODY_RADIUS;
+
+      if (!mouseOnBody) {
+        // Turn toward mouse
+        if (distToMouse > 10) {
+          let angleDiff = targetAngle - creatureAngle;
+          while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+          while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+          creatureAngle += Math.sign(angleDiff) * Math.min(Math.abs(angleDiff), TURN_SPEED * dt);
+        }
+      }
+
+      // Move only if mouse is outside body
+      if (!mouseOnBody && distToMouse > 20) {
+        speed = Math.min(speed + ACCEL * dt, MAX_SPEED);
+      } else {
+        speed = Math.max(speed - DECEL * dt, 0);
+      }
+
+      // Move
+      creatureX += Math.cos(creatureAngle) * speed * dt;
+      creatureY += Math.sin(creatureAngle) * speed * dt;
+
+      // Speed normalized 0-1
+      const speedNorm = speed / MAX_SPEED;
+
+      // Walk cycle advances proportional to speed
+      walkPhase += WALK_CYCLE_SPEED * speedNorm * dt;
+      walkPhase %= 1;
+
+      breathTime += dt;
+
+      // Blink
+      blink.timer += dt;
+      const bc = blink.timer % blink.interval;
+      let open = 1;
+      if (bc < blink.dur) {
+        const half = blink.dur / 2;
+        open = bc < half ? 1 - ease(bc / half) : ease((bc - half) / half);
+      }
+
+      // ── Draw ──
+      ctx.clearRect(0, 0, W, H);
+
+      const shape = getCurrentShape(breathTime, walkPhase, speedNorm);
+      drawSmoothTransformed(shape, creatureX, creatureY, creatureAngle);
+
+      // Eyes
+      const cos = Math.cos(creatureAngle), sin = Math.sin(creatureAngle);
+      const e1ox = creatureX + (EYE1_REL[0]*cos - EYE1_REL[1]*sin)*sc;
+      const e1oy = creatureY + (EYE1_REL[0]*sin + EYE1_REL[1]*cos)*sc;
+      const e2ox = creatureX + (EYE2_REL[0]*cos - EYE2_REL[1]*sin)*sc;
+      const e2oy = creatureY + (EYE2_REL[0]*sin + EYE2_REL[1]*cos)*sc;
+
+      drawEyeTransformed(EYE1, 18.4, creatureX, creatureY, creatureAngle, e1ox, e1oy, open);
+      drawEyeTransformed(EYE2, 72.5, creatureX, creatureY, creatureAngle, e2ox, e2oy, open);
+
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  </script>
+</body>
+</html>
